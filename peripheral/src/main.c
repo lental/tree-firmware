@@ -55,7 +55,50 @@ void configure_led(struct gpio_dt_spec l) {
 	}
 }
 
+/*
+ * Get button configuration from the devicetree sw0 alias. This is mandatory.
+ */
+#define SW0_NODE	DT_ALIAS(sw0)
+#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
+#error "Unsupported board: sw0 devicetree alias is not defined"
+#endif
+static const struct gpio_dt_spec _button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
+							      {0});
+static struct gpio_callback button_cb_data;
 
+void button_pressed(const struct device *dev, struct gpio_callback *cb,
+		    uint32_t pins)
+{
+	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
+	gpio_pin_toggle_dt(&led_two);
+}
+
+void configure_button(struct gpio_dt_spec button) {
+	if (!device_is_ready(button.port)) {
+		printk("Error: button device %s is not ready\n",
+		       button.port->name);
+		return;
+	}
+
+	int ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
+	if (ret != 0) {
+		printk("Error %d: failed to configure %s pin %d\n",
+		       ret, button.port->name, button.pin);
+		return;
+	}
+
+	ret = gpio_pin_interrupt_configure_dt(&button,
+					      GPIO_INT_EDGE_TO_ACTIVE);
+	if (ret != 0) {
+		printk("Error %d: failed to configure interrupt on %s pin %d\n",
+			ret, button.port->name, button.pin);
+		return;
+	}
+	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
+	gpio_add_callback(button.port, &button_cb_data);
+	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
+
+}
 /* Custom Service Variables */
 #define BT_UUID_CUSTOM_SERVICE_VAL \
 	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xABCD12345678)
@@ -383,6 +426,7 @@ void main(void)
 	char str[BT_UUID_STR_LEN];
 	int err;
 
+	configure_button(_button);
 	configure_led(led_one);
 	configure_led(led_two);
 	err = bt_enable(NULL);

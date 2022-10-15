@@ -38,20 +38,7 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb,
 		    uint32_t pins)
 {
 	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
-	invert_led();
-}
-
-void invert_led() {
-	/* If we have an LED, match its state to the button's. */
-	int val = gpio_pin_get_dt(&toggle_led);
-
-	if (val == 1) {
-		val = 0;
-	} else {
-		val = 1;
-	}
 	gpio_pin_toggle_dt(&toggle_led);
-	// gpio_pin_toggle(0,18);
 }
 
 void configure_led(struct gpio_dt_spec l) {
@@ -76,32 +63,6 @@ void configure_led(struct gpio_dt_spec l) {
 void main(void)
 {
 	int ret;
-
-	if (!device_is_ready(button.port)) {
-		printk("Error: button device %s is not ready\n",
-		       button.port->name);
-		return;
-	}
-
-	ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
-	if (ret != 0) {
-		printk("Error %d: failed to configure %s pin %d\n",
-		       ret, button.port->name, button.pin);
-		return;
-	}
-
-	ret = gpio_pin_interrupt_configure_dt(&button,
-					      GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret != 0) {
-		printk("Error %d: failed to configure interrupt on %s pin %d\n",
-			ret, button.port->name, button.pin);
-		return;
-	}
-
-
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
-	gpio_add_callback(button.port, &button_cb_data);
-	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
 
 	configure_led(led);
 	configure_led(toggle_led);
