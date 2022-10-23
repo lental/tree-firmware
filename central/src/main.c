@@ -23,25 +23,21 @@
 
 #define BT_UUID_CUSTOM_SERVICE_KEY \
 	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
-
-static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
+static const struct bt_uuid_128 SERVICE_UUID = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 
 #define BT_UUID_CUSTOM_SERVICE_PRESS \
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
+static const struct bt_uuid_128 PRESS_UUID = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
 
-static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
-	
-struct bt_uuid_128 discover_uuid =  BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
-
-static uint8_t* TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_KEY });
+static const uint8_t *TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_KEY });
 
 /*
  * A build error on this line means your board is unsupported.
  * See the sample documentation for information on how to fix this.
  */
-static struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
+static const struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
 						     {0});
-static struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
+static const struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
 						     {0});
 
 void configure_led(struct gpio_dt_spec l) {
@@ -63,14 +59,15 @@ void configure_led(struct gpio_dt_spec l) {
 	}
 }
 
-
 static void start_scan(void);
 
 static struct bt_conn *default_conn;
 
-static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
+static struct bt_uuid_16 discover_uuid = BT_UUID_INIT_16(0);
+static struct bt_uuid_128 discover_big_uuid =  BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 static struct bt_gatt_discover_params discover_params;
 static struct bt_gatt_subscribe_params subscribe_params;
+
 static uint8_t notify_func(struct bt_conn *conn,
 			   struct bt_gatt_subscribe_params *params,
 			   const void *data, uint16_t length)
@@ -107,9 +104,9 @@ static uint8_t discover_func(struct bt_conn *conn,
 	bt_uuid_to_str(attr->uuid, str, sizeof(str));
 	printk("[PROCESSING] handle %u, uuid type: %02X, UUID: %s\n", attr->handle, attr->uuid->type, str);
 
-	if (!bt_uuid_cmp(discover_params.uuid,&service_uuid.uuid)) {
-		memcpy(discover_uuid.val, press_uuid.val, sizeof(discover_uuid.val));
-		discover_params.uuid = &(discover_uuid.uuid);
+	if (!bt_uuid_cmp(discover_params.uuid,&SERVICE_UUID.uuid)) {
+		memcpy(discover_big_uuid.val, PRESS_UUID.val, sizeof(discover_big_uuid.val));
+		discover_params.uuid = &(discover_big_uuid.uuid);
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 
@@ -120,9 +117,9 @@ static uint8_t discover_func(struct bt_conn *conn,
 			printk("Discover failed (err %d)\n", err);
 		}
 	} else if (!bt_uuid_cmp(discover_params.uuid,
-				&press_uuid.uuid)) {
-		memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
+				&PRESS_UUID.uuid)) {
+		memcpy(&discover_uuid, BT_UUID_GATT_CCC, sizeof(discover_uuid));
+		discover_params.uuid = &discover_uuid.uuid;
 		discover_params.start_handle = attr->handle + 2;
 		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
 		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
@@ -134,8 +131,8 @@ static uint8_t discover_func(struct bt_conn *conn,
 			printk("Discover failed (err %d)\n", err);
 		}
 	} else if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS)) {
-		memcpy(&uuid, BT_UUID_HRS_MEASUREMENT, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
+		memcpy(&discover_uuid, BT_UUID_HRS_MEASUREMENT, sizeof(discover_uuid));
+		discover_params.uuid = &discover_uuid.uuid;
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 
@@ -146,8 +143,8 @@ static uint8_t discover_func(struct bt_conn *conn,
 		}
 	} else if (!bt_uuid_cmp(discover_params.uuid,
 				BT_UUID_HRS_MEASUREMENT)) {
-		memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
-		discover_params.uuid = &uuid.uuid;
+		memcpy(&discover_uuid, BT_UUID_GATT_CCC, sizeof(discover_uuid));
+		discover_params.uuid = &discover_uuid.uuid;
 		discover_params.start_handle = attr->handle + 2;
 		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
 		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
@@ -177,8 +174,8 @@ static uint8_t discover_func(struct bt_conn *conn,
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
 {
-	char addr_str[BT_ADDR_LE_STR_LEN];
 	int err;
+	char addr_str[BT_ADDR_LE_STR_LEN];
 
 	if (default_conn) {
 		return;
@@ -302,12 +299,12 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 	printk("Connected: %s\n\n", addr);
 
-	memcpy(discover_uuid.val, service_uuid.val, sizeof(discover_uuid.val));
+	memcpy(discover_big_uuid.val, SERVICE_UUID.val, sizeof(discover_big_uuid.val));
 	
 	char str[BT_UUID_STR_LEN];
-	bt_uuid_to_str(&discover_uuid.uuid, str, sizeof(str));
+	bt_uuid_to_str(&discover_big_uuid.uuid, str, sizeof(str));
 	printk("[Discover Primary] UUID: %s\n", str);
-	discover_params.uuid = &(discover_uuid.uuid);
+	discover_params.uuid = &(discover_big_uuid.uuid);
 	discover_params.func = discover_func;
 	discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
 	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;

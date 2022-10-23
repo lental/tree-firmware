@@ -32,19 +32,11 @@
 /* Custom Service Variables */
 #define BT_UUID_CUSTOM_SERVICE_KEY \
 	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
-	
-#define BT_UUID_CUSTOM_SERVICE_UUID \
-	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_KEY)
-
-static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
+static const struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 
 #define BT_UUID_CUSTOM_SERVICE_PRESS \
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
-
-#define BT_UUID_CUSTOM_SERVICE_PRESS_UUID \
-	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_PRESS)
-
-static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
+static const struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
 
 static void hrmc_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
