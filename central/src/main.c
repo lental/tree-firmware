@@ -29,15 +29,33 @@ static struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
 static struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
 						     {0});
 
+
+#define BT_UUID_CUSTOM_SERVICE_KEY \
+	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
+	
+#define BT_UUID_CUSTOM_SERVICE_UUID \
+	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_KEY)
+
+static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
+
+#define BT_UUID_CUSTOM_SERVICE_PRESS \
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
+
+#define BT_UUID_CUSTOM_SERVICE_PRESS_UUID \
+	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_PRESS)
+
+static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
+	
+struct bt_uuid_128 duuid =  BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 void configure_led(struct gpio_dt_spec l) {
-	int ret;
+	int ret = 0;
 	if (l.port && !device_is_ready(l.port)) {
 		printk("Error %d: LED device %s is not ready; ignoring it\n",
 		       ret, l.port->name);
 		l.port = NULL;
 	}
 	if (l.port) {
-		ret = gpio_pin_configure_dt(&l, GPIO_OUTPUT);
+		ret = gpio_pin_configure_dt(&l, GPIO_OUTPUT_INACTIVE);
 		if (ret != 0) {
 			printk("Error %d: failed to configure LED device %s pin %d\n",
 			       ret, l.port->name, l.pin);
@@ -53,7 +71,6 @@ static void start_scan(void);
 
 static struct bt_conn *default_conn;
 
-
 static struct bt_uuid_16 uuid = BT_UUID_INIT_16(0);
 static struct bt_gatt_discover_params discover_params;
 static struct bt_gatt_subscribe_params subscribe_params;
@@ -62,12 +79,16 @@ static uint8_t notify_func(struct bt_conn *conn,
 			   const void *data, uint16_t length)
 {
 	if (!data) {
-		// printk("[UNSUBSCRIBED]\n");
+		printk("[UNSUBSCRIBED]\n");
 		params->value_handle = 0U;
 		return BT_GATT_ITER_STOP;
 	}
 
 	printk("[NOTIFICATION] data %p length %u\n", data, length);
+	int err = gpio_pin_toggle_dt(&led_two);
+	if (err) {
+		printk("LED Toggle failed (err 0x%02x)\n", err);
+	}
 
 	return BT_GATT_ITER_CONTINUE;
 }
@@ -75,7 +96,7 @@ static uint8_t discover_func(struct bt_conn *conn,
 			     const struct bt_gatt_attr *attr,
 			     struct bt_gatt_discover_params *params)
 {
-	printk("Discover called?\n");
+	printk("Discover called\n");
 	int err;
 
 	if (!attr) {
@@ -84,30 +105,43 @@ static uint8_t discover_func(struct bt_conn *conn,
 		return BT_GATT_ITER_STOP;
 	}
 
-	printk("[ATTRIBUTE] handle %u\n", attr->handle);
+	char str[BT_UUID_STR_LEN];
+	bt_uuid_to_str(attr->uuid, str, sizeof(str));
+	printk("[PROCESSING] handle %u, uuid type: %02X, UUID: %s\n", attr->handle, attr->uuid->type, str);
 
-	if (attr->uuid->type == 0) {
-		printk("[ATTRIBUTE] uuid type: %02X, %04x\n", attr->uuid->type, BT_UUID_16(attr->uuid)->val);
-	} else if (attr->uuid->type == 1) {
-		printk("[ATTRIBUTE] uuid type: %02X, %08x\n", attr->uuid->type, BT_UUID_32(attr->uuid)->val);
-	} else if (attr->uuid->type == 2) {
-		uint8_t *val_128 = BT_UUID_128(attr->uuid)->val;
-		printk("[ATTRIBUTE] uuid type: %02X, ", attr->uuid->type);
-		for (int i = 0; i < BT_UUID_SIZE_128; i++)
-		{
-			if (i > 0) printf(":");
-			printf("%02X", val_128[i]);
+	if (!bt_uuid_cmp(discover_params.uuid,&service_uuid.uuid)) {
+		memcpy(duuid.val, press_uuid.val, sizeof(duuid.val));
+		discover_params.uuid = &(duuid.uuid);
+		discover_params.start_handle = attr->handle + 1;
+		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+
+		bt_uuid_to_str(discover_params.uuid, str, sizeof(str));
+		printk("[Discover Characteristic] UUID: %s\n", str);
+		err = bt_gatt_discover(conn, &discover_params);
+		if (err) {
+			printk("Discover failed (err %d)\n", err);
 		}
-		printk("\n");
-	}
+	} else if (!bt_uuid_cmp(discover_params.uuid,
+				&press_uuid.uuid)) {
+		memcpy(&uuid, BT_UUID_GATT_CCC, sizeof(uuid));
+		discover_params.uuid = &uuid.uuid;
+		discover_params.start_handle = attr->handle + 2;
+		discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
+		subscribe_params.value_handle = bt_gatt_attr_value_handle(attr);
 
-	// return BT_GATT_ITER_CONTINUE;
-	if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS)) {
+		bt_uuid_to_str(discover_params.uuid, str, sizeof(str));
+		printk("[Discover Descriptor] UUID: %s\n", str);
+		err = bt_gatt_discover(conn, &discover_params);
+		if (err) {
+			printk("Discover failed (err %d)\n", err);
+		}
+	} else if (!bt_uuid_cmp(discover_params.uuid, BT_UUID_HRS)) {
 		memcpy(&uuid, BT_UUID_HRS_MEASUREMENT, sizeof(uuid));
 		discover_params.uuid = &uuid.uuid;
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
-		printk("[GONA DO HEARTBEAT]\n");
+
+		printk("[Will Discover Heartbeat Characteristic]\n");
 		err = bt_gatt_discover(conn, &discover_params);
 		if (err) {
 			printk("Discover failed (err %d)\n", err);
@@ -133,7 +167,7 @@ static uint8_t discover_func(struct bt_conn *conn,
 		if (err && err != -EALREADY) {
 			printk("Subscribe failed (err %d)\n", err);
 		} else {
-			printk("[SUBSCRIBED]\n");
+			printk("[SUBSCRIBED] handle, %d\n", subscribe_params.ccc_handle);
 		}
 
 		return BT_GATT_ITER_STOP;
@@ -143,10 +177,10 @@ static uint8_t discover_func(struct bt_conn *conn,
 }
 
 
-#define BT_UUID_CUSTOM_SERVICE_VAL \
-	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xABCD12345678)
+#define BT_UUID_CUSTOM_SERVICE_KEY \
+	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
 
-static uint8_t* TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_VAL });
+static uint8_t* TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_KEY });
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
@@ -165,50 +199,59 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 
 	bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-	printk("\n\nDevice found: %s (RSSI %d)\n", addr_str, rssi);
+	// printk("\n\nDevice found: %s (RSSI %d)\n", addr_str, rssi);
 
+	// Extract Flag Metadata
 	uint8_t *ptr = ad->data;
 	uint8_t size = *ptr++;
 	uint8_t ad_type = *ptr++;
-	uint8_t flags[--size]; // -1 to remove type byte from size
-	memcpy(&flags, ptr, size);
-	printk("flag split. size:%i, type: %02X, data:", size, ad_type, flags);
-	for (int i = 0; i < size; i++)
-	{
-		if (i > 0) printf(":");
-		printf("%02X", flags[i]);
-	}
-	printk("\n");
+	size--; //uint8_t flags[--size]; // -1 to remove type byte from size
+	
+	/* --- Process the Flags --- */
+	// memcpy(&flags, ptr, size);
+	// printk("flag split. size:%i, type: %02X, data:", size, ad_type, flags);
+	// for (int i = 0; i < size; i++)
+	// {
+	// 	if (i > 0) printf(":");
+	// 	printf("%02X", flags[i]);
+	// }
+	// printk("\n");
 
+
+	// Extract 16-bit Services Metadata
 	ptr += size;
 	size = *ptr++;
 	ad_type = *ptr++;
-	uint8_t services[--size]; // -1 to remove type byte from size
-	memcpy(&services, ptr, size);
-	printk("services split. size:%i, type: %02X, data:", size, ad_type, services);
-	for (int i = 0; i < size; i++)
-	{
-		if (i > 0) printf(":");
-		printf("%02X", services[i]);
-	}
-	printk("\n");
+	size--;// uint8_t services[--size]; // -1 to remove type byte from size
 
+	/* --- Process the 16bit services --- */
+	// memcpy(&services, ptr, size);
+	// printk("services split. size:%i, type: %02X, data:", size, ad_type, services);
+	// for (int i = 0; i < size; i++)
+	// {
+	// 	if (i > 0) printf(":");
+	// 	printf("%02X", services[i]);
+	// }
+	// printk("\n");
+
+	// Extract 128-bit Services Metadata
 	ptr += size;
 	size = *ptr++;
 	ad_type = *ptr++;
-	uint8_t ad_uuid[--size]; // -1 to remove type byte from size
-	memcpy(&ad_uuid, ptr, size);
-	printk("ad_uuid split. size:%i, type: %02X, data:", size, ad_type, ad_uuid);
-	for (int i = 0; i < size; i++)
-	{
-		if (i > 0) printf(":");
-		printf("%02X", ad_uuid[i]);
-		if (ad_uuid[i] != TARGET_UUID[i]) {
-			printk("  -- ... doesn't match\n");
+	uint8_t big_uuids[--size]; // -1 to remove type byte from size
+
+	/* --- Process the 128bit services --- */
+	memcpy(&big_uuids, ptr, size);
+	// printk("big_uuids split. size:%i, type: %02X, data:", size, ad_type, big_uuids);
+	for (int i = 0; i < size; i++) {
+	// 	if (i > 0) printf(":");
+	// 	printf("%02X", big_uuids[i]);
+		if (big_uuids[i] != TARGET_UUID[i]) {
+			//printk("  -- ... doesn't match\n");
 			return;
 		}
 	}
-	printk("\n");
+	// printk("\n");
 
 	printk("found a match, connecting\n");
 	/* connect only to devices in close proximity */
@@ -228,10 +271,9 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 	}
 }
 
+
 static void start_scan(void)
 {
-	int ret = gpio_pin_toggle_dt(&led_one);
-
 	int err;
 
 	/* This demo doesn't require active scan */
@@ -244,7 +286,6 @@ static void start_scan(void)
 	printk("Scanning successfully started\n");
 }
 
-struct bt_uuid *duuid = BT_UUID_HRS;
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
@@ -265,10 +306,23 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		return;
 	}
 
-	int ret = gpio_pin_toggle_dt(&led_two);
-	printk("Connected: %s\n", addr);
-	memcpy(duuid, BT_UUID_HRS, sizeof(duuid));
-	discover_params.uuid = duuid;// &uuid;
+	err = gpio_pin_set_dt(&led_one, 1);
+	if (err) {
+		printk("LED Set failed (err 0x%02x)\n", err);
+	}
+	printk("Connected: %s\n\n", addr);
+
+	//memcpy(duuid.val, BT_UUID_HRS/*key_uuid.val*/, sizeof(duuid.val));
+	// memcpy(&uuid, BT_UUID_HRS/*key_uuid.val*/, sizeof(uuid));
+	// discover_params.uuid = &uuid.uuid;//&(duuid.uuid);// 
+
+	memcpy(duuid.val, service_uuid.val, sizeof(duuid.val));
+	//duuid.uuid = service_uuid.uuid;
+	
+	char str[BT_UUID_STR_LEN];
+	 bt_uuid_to_str(&duuid.uuid, str, sizeof(str));
+	 printk("[Discover Primary] UUID: %s\n", str);
+	discover_params.uuid = &(duuid.uuid);// &uuid;
 	discover_params.func = discover_func;
 	discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
 	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
@@ -279,8 +333,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
 		printk("Discover failed(err %d)\n", err);
 		return;
 	}
-
-	//bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
@@ -294,6 +346,10 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	printk("Disconnected: %s (reason 0x%02x)\n", addr, reason);
+	int err = gpio_pin_set_dt(&led_one, 0);
+	if (err) {
+		printk("LED Set failed (err 0x%02x)\n", err);
+	}
 
 	bt_conn_unref(default_conn);
 	default_conn = NULL;
@@ -311,7 +367,6 @@ void main(void)
 	int err;
 	configure_led(led_one);
 	configure_led(led_two);
-	int ret = gpio_pin_toggle_dt(&led_one);
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);

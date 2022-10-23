@@ -37,7 +37,7 @@ static struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
 						     {0});
 
 void configure_led(struct gpio_dt_spec l) {
-	int ret;
+	int ret = 0;
 	if (l.port && !device_is_ready(l.port)) {
 		printk("Error %d: LED device %s is not ready; ignoring it\n",
 		       ret, l.port->name);
@@ -62,16 +62,13 @@ void configure_led(struct gpio_dt_spec l) {
 #if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
 #error "Unsupported board: sw0 devicetree alias is not defined"
 #endif
+
 static const struct gpio_dt_spec _button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
 							      {0});
 static struct gpio_callback button_cb_data;
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb,
-		    uint32_t pins)
-{
-	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
-	gpio_pin_toggle_dt(&led_two);
-}
+		    uint32_t pins);
 
 void configure_button(struct gpio_dt_spec button) {
 	if (!device_is_ready(button.port)) {
@@ -100,193 +97,42 @@ void configure_button(struct gpio_dt_spec button) {
 
 }
 /* Custom Service Variables */
-#define BT_UUID_CUSTOM_SERVICE_VAL \
-	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xABCD12345678)
+#define BT_UUID_CUSTOM_SERVICE_KEY \
+	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
+	
+#define BT_UUID_CUSTOM_SERVICE_UUID \
+	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_KEY)
 
-static struct bt_uuid_128 vnd_uuid = BT_UUID_INIT_128(
-	BT_UUID_CUSTOM_SERVICE_VAL);
+static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 
-static struct bt_uuid_128 vnd_enc_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1));
+#define BT_UUID_CUSTOM_SERVICE_PRESS \
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
 
-static struct bt_uuid_128 vnd_auth_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef2));
+#define BT_UUID_CUSTOM_SERVICE_PRESS_UUID \
+	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_PRESS)
 
-#define VND_MAX_LEN 20
+static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
 
-static uint8_t vnd_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r'};
-static uint8_t vnd_auth_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r'};
-static uint8_t vnd_wwr_value[VND_MAX_LEN + 1] = { 'V', 'e', 'n', 'd', 'o', 'r' };
-
-static ssize_t read_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			void *buf, uint16_t len, uint16_t offset)
+static void hrmc_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-	const char *value = attr->user_data;
+	ARG_UNUSED(attr);
 
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, value,
-				 strlen(value));
+	bool notif_enabled = (value == BT_GATT_CCC_NOTIFY);
+
+	printk("KEYPRESS notifications %s", notif_enabled ? "enabled" : "disabled");
 }
 
-static ssize_t write_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			 const void *buf, uint16_t len, uint16_t offset,
-			 uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
 
-	if (offset + len > VND_MAX_LEN) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	memcpy(value + offset, buf, len);
-	value[offset + len] = 0;
-
-	return len;
-}
-
-static uint8_t simulate_vnd;
-static uint8_t indicating;
-static struct bt_gatt_indicate_params ind_params;
-
-static void vnd_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-	simulate_vnd = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
-}
-
-static void indicate_cb(struct bt_conn *conn,
-			struct bt_gatt_indicate_params *params, uint8_t err)
-{
-	printk("Indication %s\n", err != 0U ? "fail" : "success");
-}
-
-static void indicate_destroy(struct bt_gatt_indicate_params *params)
-{
-	printk("Indication complete\n");
-	indicating = 0U;
-}
-
-#define VND_LONG_MAX_LEN 74
-static uint8_t vnd_long_value[VND_LONG_MAX_LEN + 1] = {
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '1',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '2',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '3',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '4',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '5',
-		  'V', 'e', 'n', 'd', 'o', 'r', ' ', 'd', 'a', 't', 'a', '6',
-		  '.', ' ' };
-
-static ssize_t write_long_vnd(struct bt_conn *conn,
-			      const struct bt_gatt_attr *attr, const void *buf,
-			      uint16_t len, uint16_t offset, uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
-
-	if (flags & BT_GATT_WRITE_FLAG_PREPARE) {
-		return 0;
-	}
-
-	if (offset + len > VND_LONG_MAX_LEN) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	memcpy(value + offset, buf, len);
-	value[offset + len] = 0;
-
-	return len;
-}
-
-static const struct bt_uuid_128 vnd_long_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef3));
-
-static struct bt_gatt_cep vnd_long_cep = {
-	.properties = BT_GATT_CEP_RELIABLE_WRITE,
-};
-
-static int signed_value;
-
-static ssize_t read_signed(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			   void *buf, uint16_t len, uint16_t offset)
-{
-	const char *value = attr->user_data;
-
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, value,
-				 sizeof(signed_value));
-}
-
-static ssize_t write_signed(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-			    const void *buf, uint16_t len, uint16_t offset,
-			    uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
-
-	if (offset + len > sizeof(signed_value)) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	memcpy(value + offset, buf, len);
-
-	return len;
-}
-
-static const struct bt_uuid_128 vnd_signed_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x13345678, 0x1234, 0x5678, 0x1334, 0x56789abcdef3));
-
-static const struct bt_uuid_128 vnd_write_cmd_uuid = BT_UUID_INIT_128(
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef4));
-
-static ssize_t write_without_rsp_vnd(struct bt_conn *conn,
-				     const struct bt_gatt_attr *attr,
-				     const void *buf, uint16_t len, uint16_t offset,
-				     uint8_t flags)
-{
-	uint8_t *value = attr->user_data;
-
-	if (!(flags & BT_GATT_WRITE_FLAG_CMD)) {
-		/* Write Request received. Reject it since this Characteristic
-		 * only accepts Write Without Response.
-		 */
-		return BT_GATT_ERR(BT_ATT_ERR_WRITE_REQ_REJECTED);
-	}
-
-	if (offset + len > VND_MAX_LEN) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	memcpy(value + offset, buf, len);
-	value[offset + len] = 0;
-
-	return len;
-}
-
+#define HRS_GATT_PERM_DEFAULT (						\
+	(BT_GATT_PERM_READ | BT_GATT_PERM_WRITE))			\
+	
 /* Vendor Primary Service Declaration */
 BT_GATT_SERVICE_DEFINE(vnd_svc,
-	BT_GATT_PRIMARY_SERVICE(&vnd_uuid),
-	BT_GATT_CHARACTERISTIC(&vnd_enc_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE |
-			       BT_GATT_CHRC_INDICATE,
-			       BT_GATT_PERM_READ_ENCRYPT |
-			       BT_GATT_PERM_WRITE_ENCRYPT,
-			       read_vnd, write_vnd, vnd_value),
-	BT_GATT_CCC(vnd_ccc_cfg_changed,
-		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE_ENCRYPT),
-	BT_GATT_CHARACTERISTIC(&vnd_auth_uuid.uuid,
-			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-			       BT_GATT_PERM_READ_AUTHEN |
-			       BT_GATT_PERM_WRITE_AUTHEN,
-			       read_vnd, write_vnd, vnd_auth_value),
-	BT_GATT_CHARACTERISTIC(&vnd_long_uuid.uuid, BT_GATT_CHRC_READ |
-			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_EXT_PROP,
-			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE |
-			       BT_GATT_PERM_PREPARE_WRITE,
-			       read_vnd, write_long_vnd, &vnd_long_value),
-	BT_GATT_CEP(&vnd_long_cep),
-	BT_GATT_CHARACTERISTIC(&vnd_signed_uuid.uuid, BT_GATT_CHRC_READ |
-			       BT_GATT_CHRC_WRITE | BT_GATT_CHRC_AUTH,
-			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-			       read_signed, write_signed, &signed_value),
-	BT_GATT_CHARACTERISTIC(&vnd_write_cmd_uuid.uuid,
-			       BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-			       BT_GATT_PERM_WRITE, NULL,
-			       write_without_rsp_vnd, &vnd_wwr_value),
+	BT_GATT_PRIMARY_SERVICE(&service_uuid.uuid),
+	BT_GATT_CHARACTERISTIC(&press_uuid.uuid, BT_GATT_CHRC_NOTIFY,
+			       BT_GATT_PERM_NONE, NULL, NULL, NULL),
+	BT_GATT_CCC(hrmc_ccc_cfg_changed,
+		    HRS_GATT_PERM_DEFAULT),
 );
 
 static const struct bt_data ad[] = {
@@ -295,7 +141,7 @@ static const struct bt_data ad[] = {
 		      BT_UUID_16_ENCODE(BT_UUID_HRS_VAL),
 		      BT_UUID_16_ENCODE(BT_UUID_BAS_VAL),
 		      BT_UUID_16_ENCODE(BT_UUID_CTS_VAL)),
-	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_VAL),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_KEY),
 };
 
 void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
@@ -312,7 +158,10 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	if (err) {
 		printk("Connection failed (err 0x%02x)\n", err);
 	} else {
-		int ret = gpio_pin_toggle_dt(&led_one);
+		int err = gpio_pin_toggle_dt(&led_one);
+		if (err) {
+			printk("LED Toggle failed (err 0x%02x)\n", err);
+		}
 		printk("Connected\n");
 	}
 }
@@ -366,33 +215,12 @@ static void bt_ready(void)
 		return;
 	}
 
-	int ret = gpio_pin_toggle_dt(&led_two);
+	err = gpio_pin_toggle_dt(&led_two);
+	if (err) {
+		printk("LED Toggle failed (err 0x%02x)\n", err);
+	}
 	printk("Advertising successfully started\n");
 }
-
-static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Passkey for %s: %06u\n", addr, passkey);
-}
-
-static void auth_cancel(struct bt_conn *conn)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing cancelled: %s\n", addr);
-}
-
-static struct bt_conn_auth_cb auth_cb_display = {
-	.passkey_display = auth_passkey_display,
-	.passkey_entry = NULL,
-	.cancel = auth_cancel,
-};
 
 static void bas_notify(void)
 {
@@ -420,6 +248,22 @@ static void hrs_notify(void)
 	bt_hrs_notify(heartrate);
 }
 
+void button_pressed(const struct device *dev, struct gpio_callback *cb,
+		    uint32_t pins)
+{
+	int err;
+	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
+	gpio_pin_toggle_dt(&led_two);
+
+	static uint8_t hrm2[2] = {0x06, 0x02}; /* uint8, sensor contact */
+	 err = bt_gatt_notify(NULL, &vnd_svc.attrs[2], &hrm2, sizeof(hrm2));
+	if (err) {
+		printk("Notify 2 Failed, %i\n", err);
+	} else {
+		printk("Notify 2 worked??, handle: %i,\n", vnd_svc.attrs[2].handle);
+	}
+}
+
 void main(void)
 {
 	struct bt_gatt_attr *vnd_ind_attr;
@@ -429,6 +273,7 @@ void main(void)
 	configure_button(_button);
 	configure_led(led_one);
 	configure_led(led_two);
+
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
@@ -438,13 +283,15 @@ void main(void)
 	bt_ready();
 
 	bt_gatt_cb_register(&gatt_callbacks);
-	bt_conn_auth_cb_register(&auth_cb_display);
 
-	vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count,
-					    &vnd_enc_uuid.uuid);
-	bt_uuid_to_str(&vnd_enc_uuid.uuid, str, sizeof(str));
-	printk("Indicate VND attr %p (UUID %s)\n", vnd_ind_attr, str);
-
+	 vnd_ind_attr = bt_gatt_find_by_uuid(vnd_svc.attrs, vnd_svc.attr_count,
+	 				    &press_uuid.uuid);
+	 bt_uuid_to_str(&press_uuid.uuid, str, sizeof(str));
+	 printk("Indicate VND attr %p (UUID %s) (handle %d)\n", vnd_ind_attr, str, vnd_ind_attr->handle);
+	if (err) {
+		printk("service regi fail (err %d)\n", err);
+		return;
+	}
 	/* Implement notification. At the moment there is no suitable way
 	 * of starting delayed work so we do it here
 	 */
@@ -459,22 +306,5 @@ void main(void)
 
 		/* Battery level simulation */
 		bas_notify();
-
-		/* Vendor indication simulation */
-		if (simulate_vnd && vnd_ind_attr) {
-			if (indicating) {
-				continue;
-			}
-
-			ind_params.attr = vnd_ind_attr;
-			ind_params.func = indicate_cb;
-			ind_params.destroy = indicate_destroy;
-			ind_params.data = &indicating;
-			ind_params.len = sizeof(indicating);
-
-			if (bt_gatt_indicate(NULL, &ind_params) == 0) {
-				indicating = 1U;
-			}
-		}
 	}
 }
