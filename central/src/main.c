@@ -20,6 +20,21 @@
 #include <zephyr/sys/byteorder.h>
 
 #include <zephyr/drivers/gpio.h>
+
+#define BT_UUID_CUSTOM_SERVICE_KEY \
+	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
+
+static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
+
+#define BT_UUID_CUSTOM_SERVICE_PRESS \
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
+
+static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
+	
+struct bt_uuid_128 discover_uuid =  BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
+
+static uint8_t* TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_KEY });
+
 /*
  * A build error on this line means your board is unsupported.
  * See the sample documentation for information on how to fix this.
@@ -29,24 +44,6 @@ static struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
 static struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
 						     {0});
 
-
-#define BT_UUID_CUSTOM_SERVICE_KEY \
-	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
-	
-#define BT_UUID_CUSTOM_SERVICE_UUID \
-	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_KEY)
-
-static struct bt_uuid_128 service_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
-
-#define BT_UUID_CUSTOM_SERVICE_PRESS \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0xEEEEEEEEEEEE)
-
-#define BT_UUID_CUSTOM_SERVICE_PRESS_UUID \
-	BT_UUID_DECLARE_128(BT_UUID_CUSTOM_SERVICE_PRESS)
-
-static struct bt_uuid_128 press_uuid = BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_PRESS);
-	
-struct bt_uuid_128 duuid =  BT_UUID_INIT_128(BT_UUID_CUSTOM_SERVICE_KEY);
 void configure_led(struct gpio_dt_spec l) {
 	int ret = 0;
 	if (l.port && !device_is_ready(l.port)) {
@@ -92,6 +89,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 	return BT_GATT_ITER_CONTINUE;
 }
+
 static uint8_t discover_func(struct bt_conn *conn,
 			     const struct bt_gatt_attr *attr,
 			     struct bt_gatt_discover_params *params)
@@ -110,8 +108,8 @@ static uint8_t discover_func(struct bt_conn *conn,
 	printk("[PROCESSING] handle %u, uuid type: %02X, UUID: %s\n", attr->handle, attr->uuid->type, str);
 
 	if (!bt_uuid_cmp(discover_params.uuid,&service_uuid.uuid)) {
-		memcpy(duuid.val, press_uuid.val, sizeof(duuid.val));
-		discover_params.uuid = &(duuid.uuid);
+		memcpy(discover_uuid.val, press_uuid.val, sizeof(discover_uuid.val));
+		discover_params.uuid = &(discover_uuid.uuid);
 		discover_params.start_handle = attr->handle + 1;
 		discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 
@@ -175,12 +173,6 @@ static uint8_t discover_func(struct bt_conn *conn,
 
 	return BT_GATT_ITER_STOP;
 }
-
-
-#define BT_UUID_CUSTOM_SERVICE_KEY \
-	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
-
-static uint8_t* TARGET_UUID = ((uint8_t []) { BT_UUID_CUSTOM_SERVICE_KEY });
 
 static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 			 struct net_buf_simple *ad)
@@ -275,9 +267,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 static void start_scan(void)
 {
 	int err;
-
-	/* This demo doesn't require active scan */
-	err = bt_le_scan_start(BT_LE_SCAN_ACTIVE, device_found);
+	err = bt_le_scan_start(BT_LE_SCAN_PASSIVE, device_found);
 	if (err) {
 		printk("Scanning failed to start (err %d)\n", err);
 		return;
@@ -312,17 +302,12 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 	printk("Connected: %s\n\n", addr);
 
-	//memcpy(duuid.val, BT_UUID_HRS/*key_uuid.val*/, sizeof(duuid.val));
-	// memcpy(&uuid, BT_UUID_HRS/*key_uuid.val*/, sizeof(uuid));
-	// discover_params.uuid = &uuid.uuid;//&(duuid.uuid);// 
-
-	memcpy(duuid.val, service_uuid.val, sizeof(duuid.val));
-	//duuid.uuid = service_uuid.uuid;
+	memcpy(discover_uuid.val, service_uuid.val, sizeof(discover_uuid.val));
 	
 	char str[BT_UUID_STR_LEN];
-	 bt_uuid_to_str(&duuid.uuid, str, sizeof(str));
-	 printk("[Discover Primary] UUID: %s\n", str);
-	discover_params.uuid = &(duuid.uuid);// &uuid;
+	bt_uuid_to_str(&discover_uuid.uuid, str, sizeof(str));
+	printk("[Discover Primary] UUID: %s\n", str);
+	discover_params.uuid = &(discover_uuid.uuid);
 	discover_params.func = discover_func;
 	discover_params.start_handle = BT_ATT_FIRST_ATTRIBUTE_HANDLE;
 	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
@@ -367,6 +352,7 @@ void main(void)
 	int err;
 	configure_led(led_one);
 	configure_led(led_two);
+
 	err = bt_enable(NULL);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);

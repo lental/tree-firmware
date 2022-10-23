@@ -27,75 +27,8 @@
 
 #include "cts.h"
 #include <zephyr/drivers/gpio.h>
-/*
- * A build error on this line means your board is unsupported.
- * See the sample documentation for information on how to fix this.
- */
-static struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
-						     {0});
-static struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
-						     {0});
 
-void configure_led(struct gpio_dt_spec l) {
-	int ret = 0;
-	if (l.port && !device_is_ready(l.port)) {
-		printk("Error %d: LED device %s is not ready; ignoring it\n",
-		       ret, l.port->name);
-		l.port = NULL;
-	}
-	if (l.port) {
-		ret = gpio_pin_configure_dt(&l, GPIO_OUTPUT);
-		if (ret != 0) {
-			printk("Error %d: failed to configure LED device %s pin %d\n",
-			       ret, l.port->name, l.pin);
-			l.port = NULL;
-		} else {
-			printk("Set up LED at %s pin %d\n", l.port->name, l.pin);
-		}
-	}
-}
 
-/*
- * Get button configuration from the devicetree sw0 alias. This is mandatory.
- */
-#define SW0_NODE	DT_ALIAS(sw0)
-#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
-#error "Unsupported board: sw0 devicetree alias is not defined"
-#endif
-
-static const struct gpio_dt_spec _button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
-							      {0});
-static struct gpio_callback button_cb_data;
-
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-		    uint32_t pins);
-
-void configure_button(struct gpio_dt_spec button) {
-	if (!device_is_ready(button.port)) {
-		printk("Error: button device %s is not ready\n",
-		       button.port->name);
-		return;
-	}
-
-	int ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
-	if (ret != 0) {
-		printk("Error %d: failed to configure %s pin %d\n",
-		       ret, button.port->name, button.pin);
-		return;
-	}
-
-	ret = gpio_pin_interrupt_configure_dt(&button,
-					      GPIO_INT_EDGE_TO_ACTIVE);
-	if (ret != 0) {
-		printk("Error %d: failed to configure interrupt on %s pin %d\n",
-			ret, button.port->name, button.pin);
-		return;
-	}
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
-	gpio_add_callback(button.port, &button_cb_data);
-	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
-
-}
 /* Custom Service Variables */
 #define BT_UUID_CUSTOM_SERVICE_KEY \
 	BT_UUID_128_ENCODE(0xDEADBEEF, 0xFEED, 0xBEEF, 0xF1D0, 0xFFFFFFFFFFFF)
@@ -143,6 +76,87 @@ static const struct bt_data ad[] = {
 		      BT_UUID_16_ENCODE(BT_UUID_CTS_VAL)),
 	BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_CUSTOM_SERVICE_KEY),
 };
+
+/* DeviceTree Setup */
+/*
+ * Get button configuration from the devicetree sw0 alias. This is mandatory.
+ */
+#define SW0_NODE	DT_ALIAS(sw0)
+#if !DT_NODE_HAS_STATUS(SW0_NODE, okay)
+#error "Unsupported board: sw0 devicetree alias is not defined"
+#endif
+
+/*
+ * A build error on this line means your board is unsupported.
+ * See the sample documentation for information on how to fix this.
+ */
+static const struct gpio_dt_spec led_one = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios,
+						     {0});
+static const struct gpio_dt_spec led_two = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios,
+						     {0});
+static const struct gpio_dt_spec _button = GPIO_DT_SPEC_GET_OR(SW0_NODE, gpios,
+							      {0});
+
+void configure_led(struct gpio_dt_spec l) {
+	int ret = 0;
+	if (l.port && !device_is_ready(l.port)) {
+		printk("Error %d: LED device %s is not ready; ignoring it\n",
+		       ret, l.port->name);
+		l.port = NULL;
+	}
+	if (l.port) {
+		ret = gpio_pin_configure_dt(&l, GPIO_OUTPUT);
+		if (ret != 0) {
+			printk("Error %d: failed to configure LED device %s pin %d\n",
+			       ret, l.port->name, l.pin);
+			l.port = NULL;
+		} else {
+			printk("Set up LED at %s pin %d\n", l.port->name, l.pin);
+		}
+	}
+}
+
+static struct gpio_callback button_cb_data;
+void button_pressed(const struct device *dev, struct gpio_callback *cb,
+		    uint32_t pins)
+{
+	int err;
+	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
+	gpio_pin_toggle_dt(&led_two);
+
+	static uint8_t hrm2[2] = {0x06, 0x02}; // random data for now
+	err = bt_gatt_notify(NULL, &vnd_svc.attrs[2], &hrm2, sizeof(hrm2));
+	if (err) {
+		printk("Notify 2 Failed, %i\n", err);
+	}
+}
+
+void configure_button(struct gpio_dt_spec button) {
+	if (!device_is_ready(button.port)) {
+		printk("Error: button device %s is not ready\n",
+		       button.port->name);
+		return;
+	}
+
+	int ret = gpio_pin_configure_dt(&button, GPIO_INPUT);
+	if (ret != 0) {
+		printk("Error %d: failed to configure %s pin %d\n",
+		       ret, button.port->name, button.pin);
+		return;
+	}
+
+	ret = gpio_pin_interrupt_configure_dt(&button,
+					      GPIO_INT_EDGE_TO_ACTIVE);
+	if (ret != 0) {
+		printk("Error %d: failed to configure interrupt on %s pin %d\n",
+			ret, button.port->name, button.pin);
+		return;
+	}
+	gpio_init_callback(&button_cb_data, button_pressed, BIT(button.pin));
+	gpio_add_callback(button.port, &button_cb_data);
+	printk("Set up button at %s pin %d\n", button.port->name, button.pin);
+
+}
 
 void mtu_updated(struct bt_conn *conn, uint16_t tx, uint16_t rx)
 {
@@ -246,22 +260,6 @@ static void hrs_notify(void)
 	}
 
 	bt_hrs_notify(heartrate);
-}
-
-void button_pressed(const struct device *dev, struct gpio_callback *cb,
-		    uint32_t pins)
-{
-	int err;
-	printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
-	gpio_pin_toggle_dt(&led_two);
-
-	static uint8_t hrm2[2] = {0x06, 0x02}; /* uint8, sensor contact */
-	 err = bt_gatt_notify(NULL, &vnd_svc.attrs[2], &hrm2, sizeof(hrm2));
-	if (err) {
-		printk("Notify 2 Failed, %i\n", err);
-	} else {
-		printk("Notify 2 worked??, handle: %i,\n", vnd_svc.attrs[2].handle);
-	}
 }
 
 void main(void)
